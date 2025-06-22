@@ -230,63 +230,70 @@ through the knowledge graph, capturing structural relationships.
 """, unsafe_allow_html=True)
 
 @st.cache_data(show_spinner=False)
-def generate_embeddings(_graph):
-    # Create node index mapping
+def generate_embeddings(
+    _graph: nx.Graph,
+    num_walks: int = 200,
+    walk_length: int = 30,
+    window_size: int = 5,
+    embedding_dim: int = 64,
+    random_seed: int = 42
+) -> dict:
+    random.seed(random_seed)
     nodes = list(_graph.nodes())
     node_to_index = {node: i for i, node in enumerate(nodes)}
-    
-    # Generate random walks
+
+    # 1) Random walks
     walks = []
-    for _ in range(200):  # Number of walks per node
+    for _ in range(num_walks):
         for node in nodes:
             walk = [node]
             current = node
-            for _ in range(30):  # Walk length
-                neighbors = list(_graph.neighbors(current))
-                if neighbors:
-                    current = random.choice(neighbors)
-                    walk.append(current)
-                else:
+            for _ in range(walk_length):
+                neigh = list(_graph.neighbors(current))
+                if not neigh:
                     break
+                current = random.choice(neigh)
+                walk.append(current)
             walks.append([node_to_index[n] for n in walk])
-    
-    # Create co-occurrence matrix
-    vocab_size = len(nodes)
-    cooccurrence = lil_matrix((vocab_size, vocab_size), dtype=np.float32)
-    window_size = 5
-    
+
+    # 2) Build sparse co-occurrence
+    N = len(nodes)
+    cooc = lil_matrix((N, N), dtype=np.float32)
     for walk in walks:
-        for i, target in enumerate(walk):
+        for i, tgt in enumerate(walk):
             start = max(0, i - window_size)
             end = min(len(walk), i + window_size + 1)
-            
-            # Process context nodes
             for j in range(start, end):
-                if j == i:  # Skip the target node itself
+                if i == j:
                     continue
-                context_index = walk[j]
-                distance = abs(i - j)
-                if distance > 0:  # Prevent division by zero
-                    cooccurrence[target, context_index] += 1.0 / distance
-    
-    # Convert to dense matrix and apply PPMI
-    cooccurrence = cooccurrence.todense()
-    total = np.sum(cooccurrence)
-    sum_rows = np.sum(cooccurrence, axis=1)
-    sum_cols = np.sum(cooccurrence, axis=0)
-    
-    ppmi_matrix = np.zeros_like(cooccurrence, dtype=np.float32)
-    for i in range(vocab_size):
-        for j in range(vocab_size):
-            if cooccurrence[i, j] > 0:
-                pmi = np.log((cooccurrence[i, j] * total) / (sum_rows[i] * sum_cols[j]))
-                ppmi_matrix[i, j] = max(0, pmi)
-    
-    # Compute SVD for dimensionality reduction
-    U, s, Vt = np.linalg.svd(ppmi_matrix, full_matrices=False)
-    embeddings = U[:, :64] * np.sqrt(s[:64])
-    
-    return {node: embeddings[node_to_index[node]] for node in nodes}
+                ctx = walk[j]
+                dist = abs(i - j)
+                cooc[tgt, ctx] += 1.0 / dist
+
+    # 3) Convert to CSR for efficient arithmetic
+    cooc = cooc.tocsr()
+    total = cooc.sum()
+    row_sums = np.array(cooc.sum(axis=1)).ravel()
+    col_sums = np.array(cooc.sum(axis=0)).ravel()
+
+    # 4) Compute PPMI sparse
+    rows, cols = cooc.nonzero()
+    data = []
+    for i, j in zip(rows, cols):
+        denom = row_sums[i] * col_sums[j]
+        if denom > 0:
+            pmi = np.log((cooc[i, j] * total) / denom)
+            data.append(max(0, pmi))
+        else:
+            data.append(0)
+    from scipy.sparse import csr_matrix
+    ppmi = csr_matrix((data, (rows, cols)), shape=(N, N))
+
+    # 5) Truncated SVD
+    svd = TruncatedSVD(n_components=embedding_dim, random_state=random_seed)
+    U_reduced = svd.fit_transform(ppmi)
+
+    return {node: U_reduced[node_to_index[node]] for node in nodes}
 
 with st.spinner("Generating node embeddings (this may take 15-25 seconds)..."):
     embeddings = generate_embeddings(G)
