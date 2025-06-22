@@ -259,9 +259,15 @@ def generate_embeddings(_graph):
         for i, target in enumerate(walk):
             start = max(0, i - window_size)
             end = min(len(walk), i + window_size + 1)
-            context = walk[start:i] + walk[i+1:end]
-            for context_index in context:
-                cooccurrence[target, context_index] += 1.0 / abs(i - walk.index(context_index))
+            
+            # Process context nodes
+            for j in range(start, end):
+                if j == i:  # Skip the target node itself
+                    continue
+                context_index = walk[j]
+                distance = abs(i - j)
+                if distance > 0:  # Prevent division by zero
+                    cooccurrence[target, context_index] += 1.0 / distance
     
     # Convert to dense matrix and apply PPMI
     cooccurrence = cooccurrence.todense()
