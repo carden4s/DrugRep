@@ -16,5 +16,4 @@ kaleido
 networkx
 pandas-profiling
 node2vec
-sklearn
 scikit-image
