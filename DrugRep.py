@@ -7,7 +7,9 @@ from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import plotly.graph_objects as go
-from gensim.models import Word2Vec
+from scipy.sparse import lil_matrix
+from collections import defaultdict
+import random
 
 # Professional color scheme
 NEUTRAL_BG = "#f8f9fa"
@@ -229,29 +231,56 @@ through the knowledge graph, capturing structural relationships.
 
 @st.cache_data(show_spinner=False)
 def generate_embeddings(_graph):
+    # Create node index mapping
+    nodes = list(_graph.nodes())
+    node_to_index = {node: i for i, node in enumerate(nodes)}
+    
     # Generate random walks
     walks = []
-    for node in _graph.nodes():
-        walk = [node]
-        current = node
-        for _ in range(30):  # Walk length
-            neighbors = list(_graph.neighbors(current))
-            if neighbors:
-                current = np.random.choice(neighbors)
-                walk.append(current)
-        walks.append([str(node) for node in walk])
+    for _ in range(200):  # Number of walks per node
+        for node in nodes:
+            walk = [node]
+            current = node
+            for _ in range(30):  # Walk length
+                neighbors = list(_graph.neighbors(current))
+                if neighbors:
+                    current = random.choice(neighbors)
+                    walk.append(current)
+                else:
+                    break
+            walks.append([node_to_index[n] for n in walk])
     
-    # Train Word2Vec model
-    model = Word2Vec(
-        walks,
-        vector_size=64,
-        window=10,
-        min_count=1,
-        workers=2,
-        epochs=50
-    )
+    # Create co-occurrence matrix
+    vocab_size = len(nodes)
+    cooccurrence = lil_matrix((vocab_size, vocab_size), dtype=np.float32)
+    window_size = 5
     
-    return {node: model.wv[str(node)] for node in _graph.nodes()}
+    for walk in walks:
+        for i, target in enumerate(walk):
+            start = max(0, i - window_size)
+            end = min(len(walk), i + window_size + 1)
+            context = walk[start:i] + walk[i+1:end]
+            for context_index in context:
+                cooccurrence[target, context_index] += 1.0 / abs(i - walk.index(context_index))
+    
+    # Convert to dense matrix and apply PPMI
+    cooccurrence = cooccurrence.todense()
+    total = np.sum(cooccurrence)
+    sum_rows = np.sum(cooccurrence, axis=1)
+    sum_cols = np.sum(cooccurrence, axis=0)
+    
+    ppmi_matrix = np.zeros_like(cooccurrence, dtype=np.float32)
+    for i in range(vocab_size):
+        for j in range(vocab_size):
+            if cooccurrence[i, j] > 0:
+                pmi = np.log((cooccurrence[i, j] * total) / (sum_rows[i] * sum_cols[j]))
+                ppmi_matrix[i, j] = max(0, pmi)
+    
+    # Compute SVD for dimensionality reduction
+    U, s, Vt = np.linalg.svd(ppmi_matrix, full_matrices=False)
+    embeddings = U[:, :64] * np.sqrt(s[:64])
+    
+    return {node: embeddings[node_to_index[node]] for node in nodes}
 
 with st.spinner("Generating node embeddings (this may take 15-25 seconds)..."):
     embeddings = generate_embeddings(G)
@@ -527,7 +556,7 @@ st.markdown("""
     and {len(negatives)} negative controls, achieving a training accuracy of {accuracy:.1%}.
     </p>
 </div>
-""".format(accuracy=accuracy, len_positives=len(positives), len_negatives=len(negatives)), unsafe_allow_html=True)
+""", unsafe_allow_html=True)
 
 # Applications
 st.markdown("""
