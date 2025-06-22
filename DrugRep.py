@@ -7,6 +7,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 # Professional color scheme
 NEUTRAL_BG = "#f8f9fa"
@@ -66,6 +68,21 @@ st.markdown(f"""
         padding: 1.5rem;
         box-shadow: 0 2px 6px rgba(0,0,0,0.05);
         margin: 1.5rem 0;
+    }}
+    .methodology-card {{
+        background-color: white;
+        border-radius: 8px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        border-left: 4px solid {SECONDARY_COLOR};
+    }}
+    .step-card {{
+        background-color: #f8f9fa;
+        border-radius: 6px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+        border-left: 3px solid {ACCENT_COLOR};
     }}
 </style>
 """, unsafe_allow_html=True)
@@ -330,33 +347,51 @@ else:
     color = "#e74c3c"
     interpretation = "Low probability of therapeutic relationship"
 
-# Prediction result display
+# Enhanced Prediction Result with Plotly gauge
+st.markdown("<h3 style='color: #2c3e50; margin-top: 1rem;'>Prediction Result</h3>", unsafe_allow_html=True)
+
+# Create Plotly gauge chart
+fig_gauge = go.Figure(go.Indicator(
+    mode = "gauge+number",
+    value = probability,
+    number = {'suffix': " probability", 'font': {'size': 24}},
+    domain = {'x': [0, 1], 'y': [0, 1]},
+    title = {'text': f"{selected_drug} → {selected_disease}", 'font': {'size': 16}},
+    gauge = {
+        'axis': {'range': [0, 1], 'tickwidth': 1, 'tickcolor': "darkgray"},
+        'bar': {'color': color},
+        'bgcolor': "white",
+        'borderwidth': 2,
+        'bordercolor': "gray",
+        'steps': [
+            {'range': [0, 0.5], 'color': '#f8f9fa'},
+            {'range': [0.5, 0.75], 'color': '#fef5e7'},
+            {'range': [0.75, 1], 'color': '#eafaf1'}],
+        'threshold': {
+            'line': {'color': "black", 'width': 4},
+            'thickness': 0.75,
+            'value': probability}
+    }
+))
+
+fig_gauge.update_layout(
+    height=300,
+    margin=dict(t=50, b=10, l=20, r=20),
+    font=dict(family="sans-serif", color=PRIMARY_COLOR)
+)
+
+st.plotly_chart(fig_gauge, use_container_width=True)
+
+# Confidence interpretation
 st.markdown(f"""
-<div style="text-align: center;">
-    <h3 style="color: #2c3e50; margin-top: 0;">Prediction Result</h3>
-
-    <div style="display: flex; justify-content: center; margin-bottom: 1rem;">
-        <div>
-            <div style="font-size: 2.5rem; font-weight: bold; color: {color};">
-                {probability:.2f}
-            </div>
-            <div style="font-size: 1rem; color: #7f8c8d; margin-top: 0.5rem;">
-                Probability Score
-            </div>
-        </div>
-    </div>
-
-    <div style="margin-top: 1rem; padding: 1rem; background-color: #f8f9fa; border-radius: 8px;">
-        <p style="margin: 0; font-size: 1.1rem; color: #2c3e50;">
-            <strong>{selected_drug}</strong> → <strong>{selected_disease}</strong>
-        </p>
-        <p style="margin: 0.5rem 0 0 0; font-size: 1rem; color: {color};">
-            {interpretation} ({confidence} confidence)
-        </p>
-    </div>
+<div style="background-color: #f8f9fa; padding: 1rem; border-radius: 8px; margin-top: 1rem;">
+    <h4 style="color: {color}; margin: 0 0 10px 0;">{interpretation} ({confidence} Confidence)</h4>
+    <p style="color: #555; margin: 0;">
+        This prediction is based on the structural relationships in the biological knowledge graph 
+        and the learned patterns from known therapeutic associations.
+    </p>
 </div>
 """, unsafe_allow_html=True)
-
 
 # -- Step 4: Embedding Space Visualization --
 st.markdown("<h2 class='header'>Embedding Space Analysis</h2>", unsafe_allow_html=True)
@@ -414,45 +449,104 @@ st.pyplot(fig2)
 
 # -- Step 5: Methodology Overview --
 st.markdown("<h2 class='header'>Methodology Overview</h2>", unsafe_allow_html=True)
+
+# Enhanced Methodology Overview with step cards
 st.markdown("""
-<div style="background-color: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+<div class="methodology-card">
     <h3 style="color: #2c3e50; margin-top: 0;">Computational Framework</h3>
     
-    <p style="color: #555;">
-    This analytical pipeline employs graph-based machine learning to identify potential 
-    drug repurposing opportunities through the following steps:
-    </p>
+    <div class="step-card">
+        <h4 style="margin: 0 0 8px 0; color: #2c3e50;">1. Knowledge Graph Construction</h4>
+        <p style="color: #555; margin: 0;">
+        Integration of pharmaceutical compounds, protein targets, and disease states 
+        with established biological relationships into a structured network.
+        </p>
+    </div>
     
-    <ol style="color: #555;">
-        <li><strong>Knowledge Graph Construction</strong>: Integration of pharmaceutical, 
-        proteomic, and disease entities with established biological relationships</li>
-        <li><strong>Node Embedding Generation</strong>: Representation learning using Node2Vec 
-        to capture structural relationships in a continuous vector space</li>
-        <li><strong>Predictive Model Development</strong>: Logistic regression classifier 
-        trained on known therapeutic relationships</li>
-        <li><strong>Therapeutic Relationship Prediction</strong>: Probabilistic assessment 
-        of novel drug-disease relationships</li>
-    </ol>
+    <div class="step-card">
+        <h4 style="margin: 0 0 8px 0; color: #2c3e50;">2. Node Embedding Generation</h4>
+        <p style="color: #555; margin: 0;">
+        Application of Node2Vec algorithm to learn continuous vector representations 
+        of entities that capture structural relationships within the knowledge graph.
+        </p>
+    </div>
     
-    <h3 style="color: #2c3e50;">Analytical Validation</h3>
-    <p style="color: #555;">
-    The predictive model achieved a training accuracy of <strong>{accuracy:.1%}</strong> 
-    using {len(X_train)} samples ({len(positives)} known therapeutic relationships, 
-    {len(negatives)} negative controls).
-    </p>
+    <div class="step-card">
+        <h4 style="margin: 0 0 8px 0; color: #2c3e50;">3. Predictive Model Development</h4>
+        <p style="color: #555; margin: 0;">
+        Training of a logistic regression classifier using concatenated drug-disease 
+        embedding vectors to predict therapeutic relationships.
+        </p>
+    </div>
     
-    <h3 style="color: #2c3e50;">Applications</h3>
-    <p style="color: #555;">
-    This computational approach enables systematic identification of:
-    </p>
-    <ul style="color: #555;">
-        <li>Novel therapeutic indications for existing pharmaceutical compounds</li>
-        <li>Potential mechanisms of action through protein interaction networks</li>
-        <li>Candidate compounds for further experimental validation</li>
-    </ul>
+    <div class="step-card">
+        <h4 style="margin: 0 0 8px 0; color: #2c3e50;">4. Therapeutic Relationship Prediction</h4>
+        <p style="color: #555; margin: 0;">
+        Probabilistic assessment of novel drug-disease relationships through 
+        model inference on embedding vector pairs.
+        </p>
+    </div>
 </div>
-""".format(accuracy=accuracy, len_X_train=len(X_train), len_positives=len(positives), len_negatives=len(negatives)), 
-unsafe_allow_html=True)
+""", unsafe_allow_html=True)
+
+# Analytical Validation
+st.markdown("""
+<div style="background-color: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-top: 1.5rem;">
+    <h3 style="color: #2c3e50; margin-top: 0;">Analytical Validation</h3>
+    
+    <div style="display: flex; justify-content: space-between; margin-top: 1rem;">
+        <div style="flex: 1; padding: 1rem; background-color: #eaf7f0; border-radius: 6px; margin-right: 0.5rem;">
+            <h4 style="margin: 0 0 5px 0; color: #27ae60;">Training Accuracy</h4>
+            <p style="font-size: 1.5rem; font-weight: bold; margin: 0; color: #2c3e50;">{accuracy:.1%}</p>
+        </div>
+        
+        <div style="flex: 1; padding: 1rem; background-color: #f0f7fa; border-radius: 6px; margin-right: 0.5rem;">
+            <h4 style="margin: 0 0 5px 0; color: #3498db;">Training Samples</h4>
+            <p style="font-size: 1.5rem; font-weight: bold; margin: 0; color: #2c3e50;">{len(X_train)}</p>
+        </div>
+        
+        <div style="flex: 1; padding: 1rem; background-color: #f5f0f7; border-radius: 6px;">
+            <h4 style="margin: 0 0 5px 0; color: #8e44ad;">Known Relationships</h4>
+            <p style="font-size: 1.5rem; font-weight: bold; margin: 0; color: #2c3e50;">{len(positives)}</p>
+        </div>
+    </div>
+    
+    <p style="color: #555; margin-top: 1.5rem;">
+    The predictive model was developed using {len(positives)} known therapeutic relationships 
+    and {len(negatives)} negative controls, achieving a training accuracy of {accuracy:.1%}.
+    </p>
+</div>
+""", unsafe_allow_html=True)
+
+# Applications
+st.markdown("""
+<div style="background-color: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-top: 1.5rem;">
+    <h3 style="color: #2c3e50; margin-top: 0;">Applications</h3>
+    
+    <div style="display: flex; justify-content: space-between; margin-top: 1rem;">
+        <div style="flex: 1; padding: 1rem; margin-right: 0.5rem;">
+            <h4 style="margin: 0 0 8px 0; color: #2c3e50;">Drug Repurposing</h4>
+            <p style="color: #555; margin: 0;">
+            Identification of novel therapeutic indications for existing pharmaceutical compounds.
+            </p>
+        </div>
+        
+        <div style="flex: 1; padding: 1rem; margin-right: 0.5rem;">
+            <h4 style="margin: 0 0 8px 0; color: #2c3e50;">Mechanism Discovery</h4>
+            <p style="color: #555; margin: 0;">
+            Elucidation of potential mechanisms of action through protein interaction networks.
+            </p>
+        </div>
+        
+        <div style="flex: 1; padding: 1rem;">
+            <h4 style="margin: 0 0 8px 0; color: #2c3e50;">Candidate Prioritization</h4>
+            <p style="color: #555; margin: 0;">
+            Systematic prioritization of compounds for further experimental validation.
+            </p>
+        </div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 # Real-world example
 st.markdown("""
