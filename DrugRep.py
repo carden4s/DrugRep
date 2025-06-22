@@ -1,14 +1,13 @@
 # drug_repurposing_explorer.py
 import streamlit as st
 import networkx as nx
-from node2vec import Node2Vec
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+from gensim.models import Word2Vec
 
 # Professional color scheme
 NEUTRAL_BG = "#f8f9fa"
@@ -223,23 +222,36 @@ to identify potential therapeutic relationships based on network proximity.
 st.markdown("<h3 style='color:#2c3e50;'>Node Embedding Generation</h3>", unsafe_allow_html=True)
 st.markdown("""
 <p style="color:#555;">
-Node2Vec algorithm learns vector representations of biological entities by 
-simulating random walks through the knowledge graph, capturing structural relationships.
+We generate vector representations of biological entities using random walks 
+through the knowledge graph, capturing structural relationships.
 </p>
 """, unsafe_allow_html=True)
 
 @st.cache_data(show_spinner=False)
 def generate_embeddings(_graph):
-    n2v = Node2Vec(
-        _graph, 
-        dimensions=64,
-        walk_length=30, 
-        num_walks=200,
+    # Generate random walks
+    walks = []
+    for node in _graph.nodes():
+        walk = [node]
+        current = node
+        for _ in range(30):  # Walk length
+            neighbors = list(_graph.neighbors(current))
+            if neighbors:
+                current = np.random.choice(neighbors)
+                walk.append(current)
+        walks.append([str(node) for node in walk])
+    
+    # Train Word2Vec model
+    model = Word2Vec(
+        walks,
+        vector_size=64,
+        window=10,
+        min_count=1,
         workers=2,
-        quiet=True
+        epochs=50
     )
-    model = n2v.fit(window=10, min_count=1, batch_words=4)
-    return {node: model.wv[node] for node in _graph.nodes()}
+    
+    return {node: model.wv[str(node)] for node in _graph.nodes()}
 
 with st.spinner("Generating node embeddings (this may take 15-25 seconds)..."):
     embeddings = generate_embeddings(G)
@@ -411,8 +423,7 @@ pca = PCA(n_components=2).fit_transform(matrix)
 fig2, ax2 = plt.subplots(figsize=(8, 6))
 
 # Plot points with type-based coloring
-for node in all_nodes:
-    idx = all_nodes.index(node)
+for idx, node in enumerate(all_nodes):
     node_type = G.nodes[node]['type']
     ax2.scatter(
         pca[idx, 0], pca[idx, 1], 
@@ -466,7 +477,7 @@ st.markdown("""
     <div class="step-card">
         <h4 style="margin: 0 0 8px 0; color: #2c3e50;">2. Node Embedding Generation</h4>
         <p style="color: #555; margin: 0;">
-        Application of Node2Vec algorithm to learn continuous vector representations 
+        Application of random walk algorithms to learn continuous vector representations 
         of entities that capture structural relationships within the knowledge graph.
         </p>
     </div>
@@ -516,7 +527,7 @@ st.markdown("""
     and {len(negatives)} negative controls, achieving a training accuracy of {accuracy:.1%}.
     </p>
 </div>
-""", unsafe_allow_html=True)
+""".format(accuracy=accuracy, len_positives=len(positives), len_negatives=len(negatives)), unsafe_allow_html=True)
 
 # Applications
 st.markdown("""
