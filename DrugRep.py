@@ -647,4 +647,4 @@ st.markdown("""
     <p>Drug Repurposing Explorer v2.1 | Computational Pharmacology Platform</p>
     <p>© 2023 Biomedical Informatics Research Group</p>
 </div>
-""", unsafe_allow_html=True)
+""", unsafe_allow_html=True)        
