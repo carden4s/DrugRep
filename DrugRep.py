@@ -3,11 +3,11 @@ import streamlit as st
 import networkx as nx
 import numpy as np
 from sklearn.linear_model import LogisticRegression
-from sklearn.decomposition import PCA
+from sklearn.decomposition import PCA, TruncatedSVD  # Fixed import
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import plotly.graph_objects as go
-from scipy.sparse import lil_matrix
+from scipy.sparse import lil_matrix, csr_matrix  # Fixed import
 from collections import defaultdict
 import random
 
@@ -174,8 +174,17 @@ for node_type, color in NODE_COLORS.items():
 # Draw edges
 nx.draw_networkx_edges(G, layout, width=1.2, alpha=0.6, edge_color='#95a5a6', ax=ax)
 
-# Draw labels
-nx.draw_networkx_labels(G, layout, font_size=9, font_weight='normal', font_color='#2c3e50', ax=ax)
+# Draw labels with improved positioning
+for node, pos in layout.items():
+    node_type = G.nodes[node]['type']
+    offset = (0, 0)
+    if node_type == 'drug':
+        offset = (0, -0.02)
+    elif node_type == 'disease':
+        offset = (0, 0.02)
+    ax.text(pos[0] + offset[0], pos[1] + offset[1], node, 
+            fontsize=9, ha='center', va='center', 
+            bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', pad=1))
 
 # Add legend
 legend_elements = [
@@ -232,70 +241,69 @@ through the knowledge graph, capturing structural relationships.
 @st.cache_data(show_spinner=False)
 def generate_embeddings(
     _graph: nx.Graph,
-    num_walks: int = 200,
-    walk_length: int = 30,
-    window_size: int = 5,
-    embedding_dim: int = 64,
+    num_walks: int = 100,  # Reduced for performance
+    walk_length: int = 20,  # Reduced for performance
+    window_size: int = 4,
+    embedding_dim: int = 32,  # Reduced for performance
     random_seed: int = 42
 ) -> dict:
     random.seed(random_seed)
     nodes = list(_graph.nodes())
     node_to_index = {node: i for i, node in enumerate(nodes)}
+    N = len(nodes)
 
     # 1) Random walks
     walks = []
     for _ in range(num_walks):
+        random.shuffle(nodes)
         for node in nodes:
             walk = [node]
             current = node
-            for _ in range(walk_length):
-                neigh = list(_graph.neighbors(current))
-                if not neigh:
+            for _ in range(walk_length - 1):
+                neighbors = list(_graph.neighbors(current))
+                if not neighbors:
                     break
-                current = random.choice(neigh)
+                current = random.choice(neighbors)
                 walk.append(current)
             walks.append([node_to_index[n] for n in walk])
 
-    # 2) Build sparse co-occurrence
-    N = len(nodes)
+    # 2) Build sparse co-occurrence matrix
     cooc = lil_matrix((N, N), dtype=np.float32)
     for walk in walks:
-        for i, tgt in enumerate(walk):
-            start = max(0, i - window_size)
-            end = min(len(walk), i + window_size + 1)
-            for j in range(start, end):
-                if i == j:
+        for pos, node_idx in enumerate(walk):
+            start = max(0, pos - window_size)
+            end = min(len(walk), pos + window_size + 1)
+            for ctx_pos in range(start, end):
+                if pos == ctx_pos:
                     continue
-                ctx = walk[j]
-                dist = abs(i - j)
-                cooc[tgt, ctx] += 1.0 / dist
+                ctx_idx = walk[ctx_pos]
+                # Weight by distance
+                cooc[node_idx, ctx_idx] += 1.0 / (abs(pos - ctx_pos) + 1)
 
-    # 3) Convert to CSR for efficient arithmetic
+    # 3) Convert to CSR for efficiency
     cooc = cooc.tocsr()
     total = cooc.sum()
-    row_sums = np.array(cooc.sum(axis=1)).ravel()
-    col_sums = np.array(cooc.sum(axis=0)).ravel()
+    row_sums = np.array(cooc.sum(axis=1)).ravel() + 1e-8
+    col_sums = np.array(cooc.sum(axis=0)).ravel() + 1e-8
 
-    # 4) Compute PPMI sparse
+    # 4) Compute PPMI
+    ppmi = lil_matrix((N, N), dtype=np.float32)
     rows, cols = cooc.nonzero()
-    data = []
     for i, j in zip(rows, cols):
-        denom = row_sums[i] * col_sums[j]
-        if denom > 0:
-            pmi = np.log((cooc[i, j] * total) / denom)
-            data.append(max(0, pmi))
-        else:
-            data.append(0)
-    from scipy.sparse import csr_matrix
-    ppmi = csr_matrix((data, (rows, cols)), shape=(N, N))
+        count = cooc[i, j]
+        if count > 0:
+            pmi = np.log((count * total) / (row_sums[i] * col_sums[j]))
+            ppmi[i, j] = max(0, pmi)
+    
+    ppmi = ppmi.tocsr()
 
     # 5) Truncated SVD
     svd = TruncatedSVD(n_components=embedding_dim, random_state=random_seed)
-    U_reduced = svd.fit_transform(ppmi)
+    embeddings_mat = svd.fit_transform(ppmi)
 
-    return {node: U_reduced[node_to_index[node]] for node in nodes}
+    return {node: embeddings_mat[node_to_index[node]] for node in nodes}
 
-with st.spinner("Generating node embeddings (this may take 15-25 seconds)..."):
+with st.spinner("Generating node embeddings (this may take 10-15 seconds)..."):
     embeddings = generate_embeddings(G)
 st.success("Node embeddings successfully generated")
 
@@ -327,7 +335,9 @@ def train_classifier(emb):
         ("Atorvastatin", "Headache"),
         ("Simvastatin", "Inflammation"),
         ("Metformin", "Cardiovascular Disease"),
-        ("Aspirin", "Cardiovascular Disease")
+        ("Aspirin", "Cardiovascular Disease"),
+        ("Ibuprofen", "Alzheimer's Disease"),
+        ("Metformin", "Alzheimer's Disease")
     ]
     
     # Create training dataset
@@ -342,7 +352,7 @@ def train_classifier(emb):
         y.append(0)
     
     # Train model
-    model = LogisticRegression(max_iter=2000, class_weight='balanced').fit(X, y)
+    model = LogisticRegression(max_iter=2000, class_weight='balanced', random_state=42).fit(X, y)
     return model, X, y, positives, negatives
 
 model, X_train, y_train, positives, negatives = train_classifier(embeddings)
@@ -451,7 +461,7 @@ st.markdown(f"""
 st.markdown("<h2 class='header'>Embedding Space Analysis</h2>", unsafe_allow_html=True)
 st.markdown("""
 <p style="color:#555;">
-Principal Component Analysis (PCA) projection of 64-dimensional node embeddings 
+Principal Component Analysis (PCA) projection of 32-dimensional node embeddings 
 into 2-dimensional space for visualization.
 </p>
 """, unsafe_allow_html=True)
@@ -475,10 +485,27 @@ for idx, node in enumerate(all_nodes):
         edgecolor='#2c3e50',
         linewidth=0.5
     )
-    ax2.annotate(node, (pca[idx, 0], pca[idx, 1]), 
-                fontsize=8, 
-                xytext=(3, 3), 
-                textcoords='offset points')
+
+# Add labels with offsets to avoid overlapping
+label_positions = {}
+for idx, node in enumerate(all_nodes):
+    x, y = pca[idx, 0], pca[idx, 1]
+    
+    # Adjust position if overlapping
+    offset_x, offset_y = 0.05, 0.05
+    while (x + offset_x, y + offset_y) in label_positions.values():
+        offset_x += 0.02
+        offset_y += 0.02
+    
+    label_positions[node] = (x + offset_x, y + offset_y)
+    ax2.annotate(node, (x, y), 
+                xytext=(offset_x*40, offset_y*40),
+                textcoords='offset points',
+                fontsize=8,
+                bbox=dict(boxstyle='round,pad=0.2', 
+                          fc='white', 
+                          alpha=0.7,
+                          ec='none'))
 
 # Chart configuration
 ax2.set_title("PCA Projection of Node Embeddings", fontsize=13)
