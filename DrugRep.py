@@ -12,7 +12,12 @@ import plotly.graph_objects as go
 from scipy.sparse import lil_matrix, csr_matrix
 from collections import defaultdict
 import random
+import sys
 import shap
+
+# Check Python version
+st.sidebar.markdown(f"**Python Version:** `{sys.version}`")
+st.sidebar.markdown(f"**Streamlit Version:** `{st.__version__}`")
 
 # Professional color scheme
 NEUTRAL_BG = "#f8f9fa"
@@ -110,6 +115,7 @@ A computational approach to identify potential therapeutic relationships using g
 # MODULAR FUNCTIONS
 # ========================
 
+@st.cache_data
 def build_graph():
     """Build the biological knowledge graph with drugs, proteins, and diseases"""
     G = nx.Graph()
@@ -157,19 +163,25 @@ def build_graph():
     
     return G
 
+@st.cache_data(show_spinner=False)
 def generate_embeddings(
     _graph: nx.Graph,
     num_walks: int = 100,
     walk_length: int = 20,
     window_size: int = 4,
-    embedding_dim: int = 32,
+    max_embedding_dim: int = 32,
     random_seed: int = 42
-) -> dict:
+) -> tuple[dict, int]:
     """Generate node embeddings using random walks and PPMI matrix factorization"""
     random.seed(random_seed)
     nodes = list(_graph.nodes())
     node_to_index = {node: i for i, node in enumerate(nodes)}
     N = len(nodes)
+    
+    # Dynamically adjust embedding dimension
+    embedding_dim = min(max_embedding_dim, N - 1)  # Ensure it's <= n_features
+    if embedding_dim < max_embedding_dim:
+        st.warning(f"Reduced embedding dimension from {max_embedding_dim} to {embedding_dim} to match graph size")
 
     # 1) Random walks
     walks = []
@@ -220,8 +232,9 @@ def generate_embeddings(
     svd = TruncatedSVD(n_components=embedding_dim, random_state=random_seed)
     embeddings_mat = svd.fit_transform(ppmi)
 
-    return {node: embeddings_mat[node_to_index[node]] for node in nodes}
+    return {node: embeddings_mat[node_to_index[node]] for node in nodes}, embedding_dim
 
+@st.cache_data
 def train_classifier(emb, test_size=0.2):
     """Train and evaluate a classifier with proper validation"""
     # Known therapeutic relationships
@@ -410,8 +423,8 @@ with st.expander("Scalability Considerations"):
     """)
 
 with st.spinner("Generating node embeddings (this may take 10-15 seconds)..."):
-    embeddings = generate_embeddings(G)
-st.success("Node embeddings successfully generated")
+    embeddings, actual_dim = generate_embeddings(G)
+st.success(f"Node embeddings successfully generated ({actual_dim}-dimensional)")
 
 # Predictive model training
 st.markdown("<h3 style='color:#2c3e50;'>Predictive Model Training</h3>", unsafe_allow_html=True)
@@ -563,9 +576,9 @@ with st.spinner("Generating explanation..."):
 
 # -- Step 4: Embedding Space Visualization --
 st.markdown("<h2 class='header'>Embedding Space Analysis</h2>", unsafe_allow_html=True)
-st.markdown("""
+st.markdown(f"""
 <p style="color:#555;">
-Principal Component Analysis (PCA) projection of 32-dimensional node embeddings 
+Principal Component Analysis (PCA) projection of {actual_dim}-dimensional node embeddings 
 into 2-dimensional space for visualization.
 </p>
 """, unsafe_allow_html=True)
@@ -725,7 +738,7 @@ st.markdown("""
         
         <div style="flex: 1; padding: 1rem;">
             <h4 style="margin: 0 0 8px 0; color: #2c3e50;">Candidate Prioritization</h4>
-            <p style="color: #555; margin: 0;">
+           极
             Systematic prioritization of compounds for further experimental validation.
             </p>
         </div>
@@ -735,7 +748,7 @@ st.markdown("""
 
 # Real-world example
 st.markdown("""
-<div style="margin-top: 1.5rem; background-color: #e3f2fd; padding: 1.5rem; border-radius: 8px; border-left: 4px solid #1976d2;">
+<div style="margin-top: 1.5极; background-color: #e3f2fd; padding: 1.5rem; border-radius: 8px; border-left: 4px solid #1976d2;">
     <h3 style="color: #0d47a1; margin-top: 0;">Clinical Validation: Metformin</h3>
     <p style="color: #37474f;">
     Originally developed for type 2 diabetes, metformin has demonstrated potential therapeutic 
