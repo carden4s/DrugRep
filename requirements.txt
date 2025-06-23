@@ -17,4 +17,5 @@ networkx
 pandas-profiling
 node2vec
 gensim
+shap
 
