@@ -15,6 +15,14 @@ import random
 import sys
 import shap
 
+# Page configuration must be first Streamlit command
+st.set_page_config(
+    page_title="Drug Repurposing Explorer",
+    layout="centered",
+    page_icon="💊",
+    initial_sidebar_state="expanded"
+)
+
 # Check Python version
 st.sidebar.markdown(f"**Python Version:** `{sys.version}`")
 st.sidebar.markdown(f"**Streamlit Version:** `{st.__version__}`")
@@ -35,14 +43,6 @@ mpl.rcParams['figure.facecolor'] = 'white'
 mpl.rcParams['axes.facecolor'] = 'white'
 mpl.rcParams['grid.color'] = '#e0e0e0'
 mpl.rcParams['font.family'] = 'sans-serif'
-
-# Page configuration
-st.set_page_config(
-    page_title="Drug Repurposing Explorer",
-    layout="centered",
-    page_icon="💊",
-    initial_sidebar_state="expanded"
-)
 
 # Custom CSS for professional styling
 st.markdown(f"""
@@ -66,7 +66,7 @@ st.markdown(f"""
     }}
     .metric-box {{
         background-color: white;
-        border-radius: 8px;
+        border-radius: 8极;
         padding: 1rem;
         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
         margin-bottom: 1.5rem;
@@ -136,7 +136,7 @@ def build_graph():
         # Drug-protein relationships
         ("Aspirin", "COX1", {"desc": "COX-1 enzyme inhibition"}),
         ("Ibuprofen", "COX1", {"desc": "COX-1 enzyme inhibition"}),
-        ("Metformin", "AMPK", {"desc": "AMPK activation"}),
+        ("Metformin", "AMPK", {"desc极": "AMPK activation"}),
         ("Atorvastatin", "HMGCR", {"desc": "HMG-CoA reductase inhibition"}),
         ("Simvastatin", "HMGCR", {"desc": "HMG-CoA reductase inhibition"}),
         
@@ -571,7 +571,7 @@ relationship, while negative values push against it.
 """, unsafe_allow_html=True)
 
 with st.spinner("Generating explanation..."):
-    shap_fig = generate_shap_explanation(model, input_vector.reshape(1, -1))
+    shap_fig = generate_shap极planation(model, input_vector.reshape(1, -1))
     st.pyplot(shap_fig)
 
 # -- Step 4: Embedding Space Visualization --
@@ -738,7 +738,7 @@ st.markdown("""
         
         <div style="flex: 1; padding: 1rem;">
             <h4 style="margin: 0 0 8px 0; color: #2c3e50;">Candidate Prioritization</h4>
-           极
+            <p style="color: #555; margin: 0;">
             Systematic prioritization of compounds for further experimental validation.
             </p>
         </div>
@@ -748,7 +748,7 @@ st.markdown("""
 
 # Real-world example
 st.markdown("""
-<div style="margin-top: 1.5极; background-color: #e3f2fd; padding: 1.5rem; border-radius: 8px; border-left: 4px solid #1976d2;">
+<div style="margin-top: 1.5rem; background-color: #e3f2fd; padding: 1.5rem; border-radius: 8px; border-left: 4px solid #1976d2;">
     <h3 style="color: #0d47a1; margin-top: 0;">Clinical Validation: Metformin</h3>
     <p style="color: #37474f;">
     Originally developed for type 2 diabetes, metformin has demonstrated potential therapeutic 
