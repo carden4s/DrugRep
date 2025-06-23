@@ -571,7 +571,7 @@ relationship, while negative values push against it.
 """, unsafe_allow_html=True)
 
 with st.spinner("Generating explanation..."):
-    shap_fig = generate_shap极planation(model, input_vector.reshape(1, -1))
+    shap_fig = generate_shap_explanation(model, input_vector.reshape(1, -1))
     st.pyplot(shap_fig)
 
 # -- Step 4: Embedding Space Visualization --
