@@ -92,4 +92,13 @@ for _ in range(10):  # sample of 10 records
     data.append(record)
 
 df = pd.DataFrame(data)
-import ace_tools as tools; tools.display_dataframe_to_user(name="Dataset de Reportes de ADR Sintéticos", dataframe=df)
+
+def display_dataframe_to_user(name, dataframe):
+    """
+    Muestra un DataFrame al usuario con un nombre específico.
+    """
+    print(f"=== {name} ===")
+    print(dataframe)
+
+display_dataframe_to_user(name="Dataset de Reportes de ADR Sintéticos", dataframe=df)
+    
