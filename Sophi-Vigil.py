@@ -11,7 +11,6 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 import plotly.express as px
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
-import seaborn as sns
 
 # ======================
 # CONFIGURACIÓN INICIAL
@@ -308,14 +307,14 @@ def render_sidebar(df):
         severidad_filtro = st.multiselect("Nivel de severidad:", options=["Leve", "Moderado", "Grave"])
         fecha_filtro = st.date_input("Reportes desde:", value=datetime.now() - timedelta(days=180))
         
-        if not st.session_state.all_products:
+        # SOLUCIÓN: Usar la variable local en lugar de session_state
+        productos_filtro = []
+        if not all_products:  # Usar la variable local
             productos_filtro = st.multiselect(
                 "Productos específicos:", 
                 options=df["Producto"].unique(),
                 default=[]
             )
-        else:
-            productos_filtro = []
         
         st.markdown("---")
         st.info("Sophivigil v1.0 | Sistema de monitoreo de eventos adversos oftálmicos")
@@ -408,4 +407,3 @@ def main():
 # ======================
 if __name__ == "__main__":
     main()
-    
