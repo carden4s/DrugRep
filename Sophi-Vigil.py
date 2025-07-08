@@ -30,6 +30,45 @@ st.set_page_config(
 def get_faker_instance():
     return Faker('es_MX')
 
+def create_demographics(fake):
+    dob = fake.date_of_birth(minimum_age=20, maximum_age=80)
+    genero = random.choice(["M", "F"])
+    nombre = fake.first_name()
+    apellido = fake.last_name()
+    iniciales = f"{nombre[0]}{apellido[0]}"
+    if ' ' in nombre:
+        iniciales = f"{nombre[0]}{nombre.split(' ')[1][0]}{apellido[0]}"
+    return dob, genero, iniciales
+
+def create_treatment_data(fake, hoy):
+    start_treatment = fake.date_this_year(before_today=True, after_today=False)
+    continues_treatment = random.choice([True, False])
+    end_treatment = fake.date_between(start_date=start_treatment, end_date=hoy) if not continues_treatment else None
+    return start_treatment, continues_treatment, end_treatment
+
+def create_reaction_data(fake, start_treatment, hoy):
+    prob_antes_tratamiento = 0.3
+    if random.random() < prob_antes_tratamiento:
+        fecha_min = start_treatment - timedelta(days=30)
+        fecha_max = start_treatment
+    else:
+        fecha_min = start_treatment
+        fecha_max = min(start_treatment + timedelta(days=90), hoy)
+    
+    onset = fake.date_between_dates(date_start=fecha_min, date_end=fecha_max)
+    reaccion_continua = random.choice([True, False])
+    end_reaction = fake.date_between_dates(date_start=onset, date_end=hoy) if not reaccion_continua else None
+    return onset, reaccion_continua, end_reaction
+
+def create_description():
+    sintomas = ["enrojecimiento", "picazón", "visión borrosa", "dolor ocular", 
+               "sequedad", "sensibilidad a la luz", "inflamación", "lagrimeo"]
+    descripcion = f"Paciente reporta {random.choice(sintomas)}"
+    if random.random() > 0.5:
+        descripcion += f" acompañado de {random.choice(sintomas)}"
+    descripcion += f". {Faker().sentence()}"
+    return descripcion
+
 @st.cache_data(show_spinner="Generando datos sintéticos...")
 def generate_adr_data(num_records=15):
     fake = get_faker_instance()
@@ -46,42 +85,16 @@ def generate_adr_data(num_records=15):
     
     for _ in range(num_records):
         # Datos demográficos
-        dob = fake.date_of_birth(minimum_age=20, maximum_age=80)
-        genero = random.choice(["M", "F"])
+        dob, genero, iniciales = create_demographics(fake)
         
         # Tratamiento
-        start_treatment = fake.date_this_year(before_today=True, after_today=False)
-        continues_treatment = random.choice([True, False])
-        end_treatment = fake.date_between(start_date=start_treatment, end_date=hoy) if not continues_treatment else None
-        
-        # Iniciales consistentes
-        nombre = fake.first_name()
-        apellido = fake.last_name()
-        iniciales = f"{nombre[0]}{apellido[0]}"
-        if ' ' in nombre:
-            iniciales = f"{nombre[0]}{nombre.split(' ')[1][0]}{apellido[0]}"
+        start_treatment, continues_treatment, end_treatment = create_treatment_data(fake, hoy)
         
         # Reacción adversa
-        prob_antes_tratamiento = 0.3
-        if random.random() < prob_antes_tratamiento:
-            fecha_min = start_treatment - timedelta(days=30)
-            fecha_max = start_treatment
-        else:
-            fecha_min = start_treatment
-            fecha_max = min(start_treatment + timedelta(days=90), hoy)
+        onset, reaccion_continua, end_reaction = create_reaction_data(fake, start_treatment, hoy)
         
-        onset = fake.date_between_dates(date_start=fecha_min, date_end=fecha_max)
-        
-        reaccion_continua = random.choice([True, False])
-        end_reaction = fake.date_between_dates(date_start=onset, date_end=hoy) if not reaccion_continua else None
-
-        # Descripción con términos médicos realistas
-        sintomas = ["enrojecimiento", "picazón", "visión borrosa", "dolor ocular", 
-                   "sequedad", "sensibilidad a la luz", "inflamación", "lagrimeo"]
-        descripcion = f"Paciente reporta {random.choice(sintomas)}"
-        if random.random() > 0.5:
-            descripcion += f" acompañado de {random.choice(sintomas)}"
-        descripcion += f". {fake.sentence()}"
+        # Descripción
+        descripcion = create_description()
         
         record = {
             "ID": fake.unique.bothify(text='RPT-#####'),
@@ -121,104 +134,57 @@ def generate_adr_data(num_records=15):
     
     return df
 
-# ======================
-# INTERFAZ PRINCIPAL
-# ======================
-# Título y separador
-st.title("👁️ Sophivigil – Sistema de Farmacovigilancia Oftálmica")
-st.markdown("---")
-
-# ======================
-# BARRA LATERAL (CONTROLES)
-# ======================
-with st.sidebar:
-    st.header("⚙️ Configuración")
-    num_records = st.slider("Número de reportes", 5, 50, 15)
-    st.markdown("---")
+def apply_filters(df, all_products, productos_filtro, severidad_filtro, fecha_filtro):
+    filtered_df = df.copy()
     
-    st.header("🔍 Filtros")
-    all_products = st.checkbox("Todos los productos", True, key="all_products")
-    severidad_filtro = st.multiselect("Nivel de severidad:", options=["Leve", "Moderado", "Grave"])
-    fecha_filtro = st.date_input("Reportes desde:", value=datetime.now() - timedelta(days=180))
-    st.markdown("---")
+    if not all_products and productos_filtro:
+        filtered_df = filtered_df[filtered_df["Producto"].isin(productos_filtro)]
+        
+    if severidad_filtro:
+        filtered_df = filtered_df[filtered_df["Predicción"].isin(severidad_filtro)]
+        
+    filtered_df = filtered_df[filtered_df["Fecha_Reporte"] >= pd.to_datetime(fecha_filtro)]
     
-    st.info("Sophivigil v1.0 | Sistema de monitoreo de eventos adversos oftálmicos")
+    return filtered_df
 
-# ======================
-# GENERACIÓN DE DATOS
-# ======================
-df = generate_adr_data(num_records)
-
-# ======================
-# SIMULACIÓN DE PREDICCIONES
-# ======================
-# Generar predicciones ANTES del filtrado
-np.random.seed(42)
-probabilidades = np.random.dirichlet([1, 1, 1], size=len(df))
-pred_labels = np.random.choice(["Leve", "Moderado", "Grave"], size=len(df), p=[0.5, 0.3, 0.2])
-df["Predicción"] = pred_labels
-df["Confianza"] = [f"{p.max()*100:.1f}%" for p in probabilidades]
-
-# Actualizar opciones de filtro en sidebar
-if not st.session_state.all_products:
-    with st.sidebar:
-        productos_filtro = st.multiselect(
-            "Productos específicos:", 
-            options=df["Producto"].unique(),
-            default=[]
-        )
-else:
-    productos_filtro = []
-
-# ======================
-# FILTRADO DE DATOS
-# ======================
-filtered_df = df.copy()
-
-# Aplicar filtros
-if not st.session_state.all_products and productos_filtro:
-    filtered_df = filtered_df[filtered_df["Producto"].isin(productos_filtro)]
+def generate_predictions(df):
+    np.random.seed(42)
+    pred_labels = np.random.choice(["Leve", "Moderado", "Grave"], size=len(df), p=[0.5, 0.3, 0.2])
+    df["Predicción"] = pred_labels
     
-if severidad_filtro:
-    filtered_df = filtered_df[filtered_df["Predicción"].isin(severidad_filtro)]
+    probabilidades = np.random.dirichlet([1, 1, 1], size=len(df))
+    df["Confianza"] = [f"{p.max()*100:.1f}%" for p in probabilidades]
     
-filtered_df = filtered_df[filtered_df["Fecha_Reporte"] >= pd.to_datetime(fecha_filtro)]
+    return df
 
 # ======================
-# SECCIÓN 1: KPI Y ALERTAS
+# FUNCIONES DE VISUALIZACIÓN
 # ======================
-st.header("📊 Resumen General")
-
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.metric("Total Reportes", len(filtered_df), delta=f"{len(filtered_df)-len(df)} desde última actualización")
-with col2:
+def render_kpi_section(df, filtered_df):
     graves = filtered_df[filtered_df["Predicción"] == "Grave"]
-    st.metric("Casos Graves", len(graves), delta_color="inverse")
-with col3:
-    productos_count = filtered_df["Producto"].nunique()
-    st.metric("Productos Reportados", productos_count)
-with col4:
-    avg_response = filtered_df["Días_Inicio_Reacción"].mean() if not filtered_df.empty else 0
-    st.metric("Tiempo Reacción Promedio", f"{avg_response:.1f} días")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Reportes", len(filtered_df), delta=f"{len(filtered_df)-len(df)} desde última actualización")
+    with col2:
+        st.metric("Casos Graves", len(graves), delta_color="inverse")
+    with col3:
+        productos_count = filtered_df["Producto"].nunique()
+        st.metric("Productos Reportados", productos_count)
+    with col4:
+        avg_response = filtered_df["Días_Inicio_Reacción"].mean() if not filtered_df.empty else 0
+        st.metric("Tiempo Reacción Promedio", f"{avg_response:.1f} días")
+    
+    if not graves.empty:
+        st.error(f"🚨 **ALERTA:** Se detectaron {len(graves)} casos graves que requieren atención inmediata!")
+        with st.expander("Ver detalles de casos graves"):
+            st.dataframe(graves[["ID", "Producto", "Evento_Adverso", "Inicio_Reacción", "Descripción", "Confianza"]])
+    
+    st.markdown("---")
 
-# Alertas para casos graves
-if not graves.empty:
-    st.error(f"🚨 **ALERTA:** Se detectaron {len(graves)} casos graves que requieren atención inmediata!")
-    with st.expander("Ver detalles de casos graves"):
-        st.dataframe(graves[["ID", "Producto", "Evento_Adverso", "Inicio_Reacción", "Descripción", "Confianza"]])
-
-st.markdown("---")
-
-# ======================
-# SECCIÓN 2: VISUALIZACIONES (TABS)
-# ======================
-st.header("📈 Análisis Visual")
-tab1, tab2, tab3, tab4 = st.tabs(["Distribución", "Tendencias", "Texto", "Mapa"])
-
-# Tab 1: Distribución
-with tab1:
+def render_distribution_tab(filtered_df):
     col1, col2 = st.columns(2)
+    
     with col1:
         st.subheader("Severidad de Eventos")
         if not filtered_df.empty:
@@ -247,9 +213,9 @@ with tab1:
         else:
             st.warning("No hay datos para mostrar")
 
-# Tab 2: Tendencias
-with tab2:
+def render_trends_tab(filtered_df):
     col1, col2 = st.columns(2)
+    
     with col1:
         st.subheader("Eventos por Mes")
         if not filtered_df.empty:
@@ -277,12 +243,10 @@ with tab2:
         else:
             st.warning("No hay datos para mostrar")
 
-# Tab 3: Análisis de texto
-with tab3:
+def render_text_tab(filtered_df):
     st.subheader("Análisis de Texto")
     
     if not filtered_df.empty:
-        # Nube de palabras
         st.write("**Palabras más frecuentes en descripciones**")
         text = " ".join(filtered_df["Descripción"].tolist())
         wordcloud = WordCloud(width=800, height=400, background_color='white').generate(text)
@@ -291,7 +255,6 @@ with tab3:
         plt.axis("off")
         st.pyplot(plt)
         
-        # TF-IDF
         st.write("**Términos más relevantes (TF-IDF)**")
         tfidf = TfidfVectorizer(max_features=10, stop_words=['de', 'la', 'el', 'en', 'y', 'que'])
         X = tfidf.fit_transform(filtered_df["Descripción"])
@@ -300,8 +263,7 @@ with tab3:
     else:
         st.warning("No hay datos para mostrar")
 
-# Tab 4: Mapa
-with tab4:
+def render_map_tab(filtered_df):
     st.subheader("Distribución Geográfica")
     if not filtered_df.empty:
         country_counts = filtered_df["País"].value_counts().reset_index()
@@ -320,55 +282,130 @@ with tab4:
     else:
         st.warning("No hay datos para mostrar")
 
-st.markdown("---")
+def render_visualizations(filtered_df):
+    st.header("📈 Análisis Visual")
+    tab1, tab2, tab3, tab4 = st.tabs(["Distribución", "Tendencias", "Texto", "Mapa"])
+    
+    with tab1:
+        render_distribution_tab(filtered_df)
+    with tab2:
+        render_trends_tab(filtered_df)
+    with tab3:
+        render_text_tab(filtered_df)
+    with tab4:
+        render_map_tab(filtered_df)
+    
+    st.markdown("---")
+
+def render_sidebar(df):
+    with st.sidebar:
+        st.header("⚙️ Configuración")
+        num_records = st.slider("Número de reportes", 5, 50, 15)
+        st.markdown("---")
+        
+        st.header("🔍 Filtros")
+        all_products = st.checkbox("Todos los productos", True, key="all_products")
+        severidad_filtro = st.multiselect("Nivel de severidad:", options=["Leve", "Moderado", "Grave"])
+        fecha_filtro = st.date_input("Reportes desde:", value=datetime.now() - timedelta(days=180))
+        
+        if not st.session_state.all_products:
+            productos_filtro = st.multiselect(
+                "Productos específicos:", 
+                options=df["Producto"].unique(),
+                default=[]
+            )
+        else:
+            productos_filtro = []
+        
+        st.markdown("---")
+        st.info("Sophivigil v1.0 | Sistema de monitoreo de eventos adversos oftálmicos")
+    
+    return num_records, all_products, productos_filtro, severidad_filtro, fecha_filtro
+
+def render_data_section(filtered_df):
+    st.header("📋 Datos de Reportes")
+    with st.expander("Ver datos completos", expanded=False):
+        if not filtered_df.empty:
+            st.dataframe(filtered_df.style.background_gradient(
+                subset=["Duración_Reacción", "Duración_Tratamiento"], 
+                cmap="YlOrRd"
+            ))
+        else:
+            st.warning("No hay datos disponibles con los filtros actuales")
+
+def render_implementation_plan():
+    st.header("🚀 Próximos Pasos")
+    with st.expander("Plan de implementación", expanded=False):
+        st.markdown("""
+        **Siguientes pasos para producción**:
+        
+        1. **Modelo Predictivo Real**  
+           - Reemplazar modelo simulado con RandomForest/XGBoost entrenado
+           - Incorporar embeddings clínicos (BioBERT)
+        
+        2. **Integración de Datos**  
+           - Conectar con base de datos PostgreSQL/MySQL
+           - API para recepción de reportes en tiempo real
+        
+        3. **Sistema de Alertas**  
+           - Notificaciones push a equipos médicos
+           - Integración con Slack/Teams/Correo
+        
+        4. **Monitoreo Continuo**  
+           - Dashboard de performance del modelo
+           - Sistema de retraining automático
+        
+        5. **Funcionalidades Adicionales**  
+           - Búsqueda de casos similares
+           - Análisis de señales de seguridad
+           - Integración con sistemas de EHR
+        """)
+        
+        st.progress(0.35, text="Estado actual del proyecto")
 
 # ======================
-# SECCIÓN 3: DATOS DETALLADOS
+# FUNCIÓN PRINCIPAL
 # ======================
-st.header("📋 Datos de Reportes")
-with st.expander("Ver datos completos", expanded=False):
-    if not filtered_df.empty:
-        st.dataframe(filtered_df.style.background_gradient(
-            subset=["Duración_Reacción", "Duración_Tratamiento"], 
-            cmap="YlOrRd"
-        ))
-    else:
-        st.warning("No hay datos disponibles con los filtros actuales")
+def main():
+    # Título y separador
+    st.title("👁️ Sophivigil – Sistema de Farmacovigilancia Oftálmica")
+    st.markdown("---")
+    
+    # Generar datos iniciales
+    df = generate_adr_data(15)
+    
+    # Barra lateral
+    num_records, all_products, productos_filtro, severidad_filtro, fecha_filtro = render_sidebar(df)
+    
+    # Regenerar datos si cambió el número de registros
+    if num_records != len(df):
+        df = generate_adr_data(num_records)
+    
+    # Generar predicciones
+    df = generate_predictions(df)
+    
+    # Aplicar filtros
+    filtered_df = apply_filters(df, all_products, productos_filtro, severidad_filtro, fecha_filtro)
+    
+    # Sección de KPI
+    render_kpi_section(df, filtered_df)
+    
+    # Visualizaciones
+    render_visualizations(filtered_df)
+    
+    # Datos detallados
+    render_data_section(filtered_df)
+    
+    # Plan de implementación
+    render_implementation_plan()
+    
+    # Footer
+    st.markdown("---")
+    st.caption("© 2023 Sophivigil - Sistema de Farmacovigilancia Oftálmica | Datos simulados con propósitos demostrativos")
 
 # ======================
-# SECCIÓN 4: PLAN DE IMPLEMENTACIÓN
+# EJECUCIÓN PRINCIPAL
 # ======================
-st.header("🚀 Próximos Pasos")
-with st.expander("Plan de implementación", expanded=False):
-    st.markdown("""
-    **Siguientes pasos para producción**:
+if __name__ == "__main__":
+    main()
     
-    1. **Modelo Predictivo Real**  
-       - Reemplazar modelo simulado con RandomForest/XGBoost entrenado
-       - Incorporar embeddings clínicos (BioBERT)
-    
-    2. **Integración de Datos**  
-       - Conectar con base de datos PostgreSQL/MySQL
-       - API para recepción de reportes en tiempo real
-    
-    3. **Sistema de Alertas**  
-       - Notificaciones push a equipos médicos
-       - Integración con Slack/Teams/Correo
-    
-    4. **Monitoreo Continuo**  
-       - Dashboard de performance del modelo
-       - Sistema de retraining automático
-    
-    5. **Funcionalidades Adicionales**  
-       - Búsqueda de casos similares
-       - Análisis de señales de seguridad
-       - Integración con sistemas de EHR
-    """)
-    
-    st.progress(0.35, text="Estado actual del proyecto")
-
-# ======================
-# FOOTER
-# ======================
-st.markdown("---")
-st.caption("© 2023 Sophivigil - Sistema de Farmacovigilancia Oftálmica | Datos simulados con propósitos demostrativos")
