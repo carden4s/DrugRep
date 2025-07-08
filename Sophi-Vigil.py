@@ -36,7 +36,9 @@ def create_demographics(fake):
     apellido = fake.last_name()
     iniciales = f"{nombre[0]}{apellido[0]}"
     if ' ' in nombre:
-        iniciales = f"{nombre[0]}{nombre.split(' ')[1][0]}{apellido[0]}"
+        partes_nombre = nombre.split(' ')
+        if len(partes_nombre) > 1:
+            iniciales = f"{partes_nombre[0][0]}{partes_nombre[1][0]}{apellido[0]}"
     return dob, genero, iniciales
 
 def create_treatment_data(fake, hoy):
@@ -59,13 +61,13 @@ def create_reaction_data(fake, start_treatment, hoy):
     end_reaction = fake.date_between_dates(date_start=onset, date_end=hoy) if not reaccion_continua else None
     return onset, reaccion_continua, end_reaction
 
-def create_description():
+def create_description(fake):
     sintomas = ["enrojecimiento", "picazón", "visión borrosa", "dolor ocular", 
                "sequedad", "sensibilidad a la luz", "inflamación", "lagrimeo"]
     descripcion = f"Paciente reporta {random.choice(sintomas)}"
     if random.random() > 0.5:
         descripcion += f" acompañado de {random.choice(sintomas)}"
-    descripcion += f". {Faker().sentence()}"
+    descripcion += f". {fake.sentence()}"
     return descripcion
 
 @st.cache_data(show_spinner="Generando datos sintéticos...")
@@ -93,7 +95,11 @@ def generate_adr_data(num_records=15):
         onset, reaccion_continua, end_reaction = create_reaction_data(fake, start_treatment, hoy)
         
         # Descripción
-        descripcion = create_description()
+        descripcion = create_description(fake)
+        
+        # Cálculo de duraciones
+        duracion_tratamiento = (end_treatment - start_treatment).days if end_treatment else (hoy - start_treatment).days
+        duracion_reaccion = (end_reaction - onset).days if end_reaction else (hoy - onset).days
         
         record = {
             "ID": fake.unique.bothify(text='RPT-#####'),
@@ -103,7 +109,7 @@ def generate_adr_data(num_records=15):
             "País": fake.country_code(representation="alpha-2"),
             "Producto": random.choice(productos),
             "Inicio_Tratamiento": start_treatment,
-            "Duración_Tratamiento": (end_treatment - start_treatment).days if end_treatment else (hoy - start_treatment).days,
+            "Duración_Tratamiento": duracion_tratamiento,
             "Continúa": "Si" if continues_treatment else "No",
             "Fin_Tratamiento": end_treatment,
             "Lote": fake.bothify(text='LOT-??###'),
@@ -111,7 +117,7 @@ def generate_adr_data(num_records=15):
             "Inicio_Reacción": onset,
             "Días_Inicio_Reacción": (onset - start_treatment).days,
             "Fin_Reacción": end_reaction,
-            "Duración_Reacción": (end_reaction - onset).days if end_reaction else (hoy - onset).days,
+            "Duración_Reacción": duracion_reaccion,
             "Descripción": descripcion,
             "Reportero": fake.name(),
             "Relación": random.choice(relaciones),
@@ -141,8 +147,9 @@ def apply_filters(df, all_products, productos_filtro, severidad_filtro, fecha_fi
         
     if severidad_filtro:
         filtered_df = filtered_df[filtered_df["Predicción"].isin(severidad_filtro)]
-        
-    filtered_df = filtered_df[filtered_df["Fecha_Reporte"] >= pd.to_datetime(fecha_filtro)]
+    
+    if fecha_filtro:
+        filtered_df = filtered_df[filtered_df["Fecha_Reporte"] >= pd.to_datetime(fecha_filtro)]
     
     return filtered_df
 
@@ -200,12 +207,16 @@ def render_distribution_tab(filtered_df):
     with col2:
         st.subheader("Top Productos Reportados")
         if not filtered_df.empty:
-            top_products = filtered_df["Producto"].value_counts().nlargest(5)
+            top_products = filtered_df["Producto"].value_counts().nlargest(5).reset_index()
+            top_products.columns = ['Producto', 'Reportes']
+            
             fig = px.bar(
                 top_products, 
-                orientation="h",
-                labels={'value':'Reportes', 'index':'Producto'},
-                color=top_products.values,
+                x='Reportes',
+                y='Producto',
+                orientation='h',
+                labels={'Reportes':'Reportes', 'Producto':'Producto'},
+                color='Reportes',
                 color_continuous_scale="Bluered"
             )
             st.plotly_chart(fig, use_container_width=True)
@@ -218,10 +229,15 @@ def render_trends_tab(filtered_df):
     with col1:
         st.subheader("Eventos por Mes")
         if not filtered_df.empty:
-            df_mensual = filtered_df.set_index("Fecha_Reporte").resample('M').size()
+            df_mensual = filtered_df.copy()
+            df_mensual['Mes'] = df_mensual['Fecha_Reporte'].dt.to_period('M').dt.to_timestamp()
+            df_mensual = df_mensual.groupby('Mes').size().reset_index(name='Reportes')
+            
             fig = px.line(
                 df_mensual, 
-                labels={'value':'Reportes', 'index':'Fecha'},
+                x='Mes',
+                y='Reportes',
+                labels={'Reportes':'Reportes', 'Mes':'Fecha'},
                 title="Tendencia Mensual de Reportes"
             )
             st.plotly_chart(fig, use_container_width=True)
@@ -246,19 +262,35 @@ def render_text_tab(filtered_df):
     st.subheader("Análisis de Texto")
     
     if not filtered_df.empty:
+        # SOLUCIÓN: Generar nube de palabras de forma segura
         st.write("**Palabras más frecuentes en descripciones**")
         text = " ".join(filtered_df["Descripción"].tolist())
-        wordcloud = WordCloud(width=800, height=400, background_color='white').generate(text)
-        plt.figure(figsize=(10, 5))
-        plt.imshow(wordcloud, interpolation='bilinear')
-        plt.axis("off")
-        st.pyplot(plt)
         
+        # Crear figura explícitamente
+        fig, ax = plt.subplots(figsize=(10, 5))
+        
+        # Manejar caso de texto vacío
+        if text.strip():
+            wordcloud = WordCloud(width=800, height=400, background_color='white').generate(text)
+            ax.imshow(wordcloud, interpolation='bilinear')
+        else:
+            ax.text(0.5, 0.5, 'No hay texto disponible', 
+                     horizontalalignment='center', 
+                     verticalalignment='center',
+                     fontsize=20)
+        
+        ax.axis("off")
+        st.pyplot(fig)
+        
+        # TF-IDF
         st.write("**Términos más relevantes (TF-IDF)**")
-        tfidf = TfidfVectorizer(max_features=10, stop_words=['de', 'la', 'el', 'en', 'y', 'que'])
-        X = tfidf.fit_transform(filtered_df["Descripción"])
-        tfidf_df = pd.DataFrame(X.toarray(), columns=tfidf.get_feature_names_out())
-        st.bar_chart(tfidf_df.mean().sort_values(ascending=False))
+        if text.strip():
+            tfidf = TfidfVectorizer(max_features=10, stop_words=['de', 'la', 'el', 'en', 'y', 'que'])
+            X = tfidf.fit_transform(filtered_df["Descripción"])
+            tfidf_df = pd.DataFrame(X.toarray(), columns=tfidf.get_feature_names_out())
+            st.bar_chart(tfidf_df.mean().sort_values(ascending=False))
+        else:
+            st.warning("No hay texto suficiente para análisis TF-IDF")
     else:
         st.warning("No hay datos para mostrar")
 
@@ -307,12 +339,11 @@ def render_sidebar(df):
         severidad_filtro = st.multiselect("Nivel de severidad:", options=["Leve", "Moderado", "Grave"])
         fecha_filtro = st.date_input("Reportes desde:", value=datetime.now() - timedelta(days=180))
         
-        # SOLUCIÓN: Usar la variable local en lugar de session_state
         productos_filtro = []
-        if not all_products:  # Usar la variable local
+        if not all_products:
             productos_filtro = st.multiselect(
                 "Productos específicos:", 
-                options=df["Producto"].unique(),
+                options=df["Producto"].unique() if not df.empty else [],
                 default=[]
             )
         
@@ -325,7 +356,15 @@ def render_data_section(filtered_df):
     st.header("📋 Datos de Reportes")
     with st.expander("Ver datos completos", expanded=False):
         if not filtered_df.empty:
-            st.dataframe(filtered_df.style.background_gradient(
+            # Convertir a string para evitar problemas de formato
+            display_df = filtered_df.copy()
+            date_cols = ["Inicio_Tratamiento", "Fin_Tratamiento", "Inicio_Reacción", 
+                        "Fin_Reacción", "Fecha_Reporte"]
+            for col in date_cols:
+                if col in display_df.columns:
+                    display_df[col] = display_df[col].dt.strftime('%Y-%m-%d')
+            
+            st.dataframe(display_df.style.background_gradient(
                 subset=["Duración_Reacción", "Duración_Tratamiento"], 
                 cmap="YlOrRd"
             ))
