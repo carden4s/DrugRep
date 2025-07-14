@@ -34,11 +34,19 @@ def create_demographics(fake):
     genero = random.choice(["M", "F"])
     nombre = fake.first_name()
     apellido = fake.last_name()
-    iniciales = f"{nombre[0]}{apellido[0]}"
-    if ' ' in nombre:
-        partes_nombre = nombre.split(' ')
-        if len(partes_nombre) > 1:
-            iniciales = f"{partes_nombre[0][0]}{partes_nombre[1][0]}{apellido[0]}"
+    
+    # Generate initials safely
+    parts = [p.strip() for p in nombre.split() if p.strip()]
+    
+    if len(parts) >= 2:
+        # Handle potential single-character parts
+        first_char = parts[0][0] if parts[0] else ''
+        second_char = parts[1][0] if len(parts[1]) > 0 else ''
+        iniciales = f"{first_char}{second_char}{apellido[0]}"
+    else:
+        # Fallback to first char of first name + last name
+        iniciales = f"{nombre[0]}{apellido[0]}" if nombre and apellido else "XX"
+    
     return dob, genero, iniciales
 
 def create_treatment_data(fake, hoy):
@@ -72,6 +80,11 @@ def create_description(fake):
 
 @st.cache_data(show_spinner="Generando datos sintéticos...")
 def generate_adr_data(num_records=15):
+    # Validate minimum records
+    if num_records < 5:
+        num_records = 5
+        st.warning("Número mínimo de registros ajustado a 5 para análisis significativo")
+    
     fake = get_faker_instance()
     productos = [
         "3-A Ofteno", "Acquafil Ofteno", "Deltamid", "Dustalox", "Eliptic Ofteno",
@@ -85,7 +98,7 @@ def generate_adr_data(num_records=15):
     hoy = datetime.now().date()
     
     for _ in range(num_records):
-        # Datos demográficos
+        # Datos demográficos con validación
         dob, genero, iniciales = create_demographics(fake)
         
         # Tratamiento
@@ -97,10 +110,15 @@ def generate_adr_data(num_records=15):
         # Descripción
         descripcion = create_description(fake)
         
-        # Cálculo de duraciones
-        duracion_tratamiento = (end_treatment - start_treatment).days if end_treatment else (hoy - start_treatment).days
-        duracion_reaccion = (end_reaction - onset).days if end_reaction else (hoy - onset).days
-        
+        # Cálculo de duraciones con validación de fechas
+        try:
+            duracion_tratamiento = (end_treatment - start_treatment).days if end_treatment else (hoy - start_treatment).days
+            duracion_reaccion = (end_reaction - onset).days if end_reaction else (hoy - onset).days
+        except TypeError:
+            # Fallback if date calculation fails
+            duracion_tratamiento = random.randint(30, 365)
+            duracion_reaccion = random.randint(1, 90)
+
         record = {
             "ID": fake.unique.bothify(text='RPT-#####'),
             "Iniciales": iniciales,
@@ -130,12 +148,15 @@ def generate_adr_data(num_records=15):
     
     df = pd.DataFrame(data)
     
-    # Convertir a formato datetime
+    # Convertir a formato datetime con manejo de errores
     date_cols = ["Inicio_Tratamiento", "Fin_Tratamiento", "Inicio_Reacción", 
                 "Fin_Reacción", "Fecha_Reporte"]
     for col in date_cols:
         if col in df.columns:
-            df[col] = pd.to_datetime(df[col])
+            df[col] = pd.to_datetime(df[col], errors='coerce')
+            # Fill missing dates with reasonable values
+            if df[col].isnull().any():
+                df[col] = df[col].fillna(pd.Timestamp(datetime.now().date()))
     
     return df
 
@@ -262,17 +283,21 @@ def render_text_tab(filtered_df):
     st.subheader("Análisis de Texto")
     
     if not filtered_df.empty:
-        # SOLUCIÓN: Generar nube de palabras de forma segura
         st.write("**Palabras más frecuentes en descripciones**")
         text = " ".join(filtered_df["Descripción"].tolist())
         
-        # Crear figura explícitamente
+        # Create figure safely
         fig, ax = plt.subplots(figsize=(10, 5))
         
-        # Manejar caso de texto vacío
         if text.strip():
-            wordcloud = WordCloud(width=800, height=400, background_color='white').generate(text)
-            ax.imshow(wordcloud, interpolation='bilinear')
+            try:
+                wordcloud = WordCloud(width=800, height=400, background_color='white').generate(text)
+                ax.imshow(wordcloud, interpolation='bilinear')
+            except:
+                ax.text(0.5, 0.5, 'Error generando nube de palabras', 
+                         horizontalalignment='center', 
+                         verticalalignment='center',
+                         fontsize=20)
         else:
             ax.text(0.5, 0.5, 'No hay texto disponible', 
                      horizontalalignment='center', 
@@ -285,10 +310,13 @@ def render_text_tab(filtered_df):
         # TF-IDF
         st.write("**Términos más relevantes (TF-IDF)**")
         if text.strip():
-            tfidf = TfidfVectorizer(max_features=10, stop_words=['de', 'la', 'el', 'en', 'y', 'que'])
-            X = tfidf.fit_transform(filtered_df["Descripción"])
-            tfidf_df = pd.DataFrame(X.toarray(), columns=tfidf.get_feature_names_out())
-            st.bar_chart(tfidf_df.mean().sort_values(ascending=False))
+            try:
+                tfidf = TfidfVectorizer(max_features=10, stop_words=['de', 'la', 'el', 'en', 'y', 'que'])
+                X = tfidf.fit_transform(filtered_df["Descripción"])
+                tfidf_df = pd.DataFrame(X.toarray(), columns=tfidf.get_feature_names_out())
+                st.bar_chart(tfidf_df.mean().sort_values(ascending=False))
+            except:
+                st.warning("Error en análisis TF-IDF")
         else:
             st.warning("No hay texto suficiente para análisis TF-IDF")
     else:
@@ -405,41 +433,47 @@ def render_implementation_plan():
 # FUNCIÓN PRINCIPAL
 # ======================
 def main():
-    # Título y separador
-    st.title("👁️ Sophivigil – Sistema de Farmacovigilancia Oftálmica")
-    st.markdown("---")
+    try:
+        # Título y separador
+        st.title("👁️ Sophivigil – Sistema de Farmacovigilancia Oftálmica")
+        st.markdown("---")
+        
+        # Generar datos iniciales
+        df = generate_adr_data(15)
+        
+        # Barra lateral
+        num_records, all_products, productos_filtro, severidad_filtro, fecha_filtro = render_sidebar(df)
+        
+        # Regenerar datos si cambió el número de registros
+        if num_records != len(df):
+            df = generate_adr_data(num_records)
+        
+        # Generar predicciones
+        df = generate_predictions(df)
+        
+        # Aplicar filtros
+        filtered_df = apply_filters(df, all_products, productos_filtro, severidad_filtro, fecha_filtro)
+        
+        # Sección de KPI
+        render_kpi_section(df, filtered_df)
+        
+        # Visualizaciones
+        render_visualizations(filtered_df)
+        
+        # Datos detallados
+        render_data_section(filtered_df)
+        
+        # Plan de implementación
+        render_implementation_plan()
+        
+        # Footer
+        st.markdown("---")
+        st.caption("© 2023 Sophivigil - Sistema de Farmacovigilancia Oftálmica | Datos simulados con propósitos demostrativos")
     
-    # Generar datos iniciales
-    df = generate_adr_data(15)
-    
-    # Barra lateral
-    num_records, all_products, productos_filtro, severidad_filtro, fecha_filtro = render_sidebar(df)
-    
-    # Regenerar datos si cambió el número de registros
-    if num_records != len(df):
-        df = generate_adr_data(num_records)
-    
-    # Generar predicciones
-    df = generate_predictions(df)
-    
-    # Aplicar filtros
-    filtered_df = apply_filters(df, all_products, productos_filtro, severidad_filtro, fecha_filtro)
-    
-    # Sección de KPI
-    render_kpi_section(df, filtered_df)
-    
-    # Visualizaciones
-    render_visualizations(filtered_df)
-    
-    # Datos detallados
-    render_data_section(filtered_df)
-    
-    # Plan de implementación
-    render_implementation_plan()
-    
-    # Footer
-    st.markdown("---")
-    st.caption("© 2023 Sophivigil - Sistema de Farmacovigilancia Oftálmica | Datos simulados con propósitos demostrativos")
+    except Exception as e:
+        st.error(f"**Error crítico en la aplicación**: {str(e)}")
+        st.error("Por favor recargue la página o contacte al equipo de soporte")
+        st.stop()
 
 # ======================
 # EJECUCIÓN PRINCIPAL
